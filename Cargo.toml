@@ -1,10 +1,10 @@
 [package]
-name         = "sema"
+name         = "memory"
 version      = "0.1.1"
 edition      = "2024"
 rust-version = "1.85"
 license      = "MIT OR Apache-2.0"
-repository   = "https://github.com/LiGoldragon/sema"
+repository   = "https://github.com/LiGoldragon/memory"
 description  = "Typed, version-guarded database kernel over redb and rkyv"
 
 [dependencies]

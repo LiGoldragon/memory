@@ -2,7 +2,7 @@
   "database": "dolt",
   "backend": "dolt",
   "dolt_mode": "embedded",
-  "dolt_database": "sema",
+  "dolt_database": "memory",
   "project_id": "73a83eaa-928d-4325-9f75-d1ea69353f0d",
   "global_dolt_database": "beads_global"
 }

@@ -1,42 +1,42 @@
-# Skill — working in sema
+# Skill — working in memory
 
 *What an agent needs to know to be effective in this repo.*
 
 ---
 
-## What sema is
+## What memory is
 
-Sema is the **workspace's typed-database kernel**. redb-backed;
+Memory is the **workspace's typed-database kernel**. redb-backed;
 values are rkyv-archived; tables are typed and version-guarded.
-Each ecosystem layers its own typed tables atop sema in a
+Each ecosystem layers its own typed tables atop memory in a
 state-owning component. A separate typed-table crate is only
 warranted when more than one component genuinely shares the same
-table layer. Do not assume a broad `persona-sema` component exists.
+table layer. Do not assume a broad `persona-memory` component exists.
 
-Sema is to **state** what `signal-core` is to **wire**: the
+Memory is to **state** what `signal-core` is to **wire**: the
 kernel of typed primitives every consumer's typed layer
 depends on.
 
 Read `ARCHITECTURE.md` for the role/boundaries summary: what
-sema (the kernel) owns, what each consumer-owned typed Sema layer
+memory (the kernel) owns, what each consumer-owned typed Memory layer
 owns, and the surface each side has.
 
 ---
 
 ## Intent
 
-**Sema is meant to become impossible to improve as a storage
+**Memory is meant to become impossible to improve as a storage
 kernel.**
 
 > *"I am much more interested in a good design than in producing
-> it quickly — criome and sema are meant to be eventually
+> it quickly — criome and memory are meant to be eventually
 > impossible to improve, so I value clarity, correctness, and
 > introspection above production volume, speed, and time to
 > market."*
 >
 > — Li, 2026-04-29
 
-For sema specifically, this commits the project to:
+For memory specifically, this commits the project to:
 
 - **The on-disk format reads cleanly.** A future engineer (or
   agent) opening the redb file and the per-kind table layout
@@ -44,12 +44,12 @@ For sema specifically, this commits the project to:
   invariants the change-log preserves.
 - **Every wire shape is typed.** No string-tagged columns, no
   opaque blobs the engine treats as untyped. If a value flows
-  through sema, it has a closed Rust type with a derived rkyv
+  through memory, it has a closed Rust type with a derived rkyv
   encoding.
 - **State is typed at the table boundary.** The kernel stores
   closed Rust values through typed tables. Identity policy,
   content addressing, history, and bitemporal meaning belong to
-  `sema-engine` or the consuming domain, not to this kernel.
+  `memory-engine` or the consuming domain, not to this kernel.
 
 When a design choice trades clarity for speed of writing, intent
 wins. The right format now is worth more than a wrong format
@@ -60,7 +60,7 @@ sooner.
 ## Hard invariants for an agent working here
 
 - **One redb file per consumer.** Each state-bearing component
-  opens its own file through its local typed Sema layer;
+  opens its own file through its local typed Memory layer;
   cross-consumer sharing is not a thing. The kernel doesn't care
   which file; the consumer decides.
 - **Values are rkyv-archived.** No JSON, no string-tagged
@@ -71,21 +71,21 @@ sooner.
   to open a file whose stored version doesn't match. Schema
   changes are coordinated upgrades, not silent migrations.
 - **Database format is checked at open.** The kernel persists a
-  `DatabaseHeader` naming Sema's rkyv format identity
+  `DatabaseHeader` naming Memory's rkyv format identity
   (little-endian, pointer-width-32, unaligned, bytecheck) and
   refuses to open a database whose stored header mismatches this
   build.
-- **Internal tables are namespaced.** Sema-owned redb tables use
-  the `__sema_` prefix (`__sema_headers`, `__sema_meta`).
+- **Internal tables are namespaced.** Memory-owned redb tables use
+  the `__memory_` prefix (`__memory_headers`, `__memory_meta`).
   Consumer table names must not use that prefix.
 - **Record types live in Signal contracts or component domain crates,
-  not in sema.** The consumer's typed-storage layer references those
+  not in memory.** The consumer's typed-storage layer references those
   records as values; it owns the table layout, not the records.
 - **No raw slot allocation surface.** Append-only identity and
   sequence allocation are engine/domain concepts. They do not live
   in this storage kernel.
 - **Typed table scans return owned keys.** redb yields borrowed
-  keys for borrowed key types (`&str`, `&[u8]`). Sema's
+  keys for borrowed key types (`&str`, `&[u8]`). Memory's
   `Table::iter` and `Table::range` eagerly collect rows and
   return `OwnedTableKey::Owned`, so callers never hold redb
   guards across the transaction boundary.
@@ -94,7 +94,7 @@ sooner.
 
 ## What this repo is canonical for
 
-Sema (the kernel) owns:
+Memory (the kernel) owns:
 
 - The redb file lifecycle (open-or-create + parent mkdir +
   ensure_tables).
@@ -107,9 +107,9 @@ Sema (the kernel) owns:
 - The standard `Error` enum (5 redb-error variants +
   rkyv + io + schema-version mismatch).
 - The version-skew guard and database-format guard.
-Sema (the kernel) does not own raw slot allocation, read-pool
+Memory (the kernel) does not own raw slot allocation, read-pool
 configuration, query planning, subscriptions, validation, or
-operation logs. Those live in `sema-engine` or the consuming
+operation logs. Those live in `memory-engine` or the consuming
 component.
 
 ## Test command surface
@@ -127,10 +127,10 @@ nix run .#test-doc
 for named inner-loop surfaces and are exposed as flake apps so
 the pinned Rust toolchain is used.
 
-Sema does **not** own:
+Memory does **not** own:
 
 - Per-consumer schema, table layouts, or migration
-  helpers — those live in the state-owning component's typed Sema
+  helpers — those live in the state-owning component's typed Memory
   layer, or in a dedicated crate only when sharing earns it.
 - Record types — those live in Signal contracts or component domain
   crates.
@@ -143,13 +143,13 @@ Sema does **not** own:
 
 ## See also
 
-- `ARCHITECTURE.md` — sema's role and boundaries.
+- `ARCHITECTURE.md` — memory's role and boundaries.
 - `AGENTS.md` — repo-specific carve-outs.
-- `sema-engine` — the engine that executes Signal database verbs
+- `memory-engine` — the engine that executes Signal database verbs
   over this storage kernel.
 - signal's `skills.md` — the rkyv types of records.
 - arca's `skills.md` — the content-addressed artifact store.
-- prism's `skills.md` — sema → Rust projector.
+- prism's `skills.md` — memory → Rust projector.
 - lore's `programming/abstractions.md`,
   `programming/beauty.md`,
   `programming/push-not-pull.md` — cross-language discipline.

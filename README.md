@@ -1,11 +1,11 @@
-# sema
+# memory
 
-The sema database kernel: typed, version-guarded table access over
+The memory database kernel: typed, version-guarded table access over
 [redb](https://github.com/cberner/redb) with rkyv-archived Rust values.
 This crate owns the database kernel only. Component-specific tables and
 relations live in the state-bearing component that owns that database.
 
-The typed-kernel surface stores a Sema database header alongside
+The typed-kernel surface stores a Memory database header alongside
 the schema version, so each database records the rkyv format
 identity it was written with.
 
@@ -33,7 +33,7 @@ nix run .#test-doc
 ## Reference
 
 `reference/Vision.md` — aspirational description
-of the mature sema format (universal typed-binary of meaning,
+of the mature memory format (universal typed-binary of meaning,
 self-transforming via quorum-signed spec changes, criome as the
 distributed web). Reference material for future direction; current
-implementation is the pseudo-sema layer above.
+implementation is the pseudo-memory layer above.

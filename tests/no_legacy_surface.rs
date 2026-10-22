@@ -1,4 +1,4 @@
-//! Architectural truth tests for retired sema surfaces.
+//! Architectural truth tests for retired memory surfaces.
 //!
 //! These tests intentionally inspect the public source because the
 //! constraint is negative: the storage kernel must not grow a raw
@@ -12,7 +12,7 @@ fn lib_source() -> String {
 }
 
 #[test]
-fn sema_does_not_export_slot() {
+fn memory_does_not_export_slot() {
     let source = lib_source();
     assert!(!source.contains("pub struct Slot"));
     assert!(!source.contains("impl From<u64> for Slot"));
@@ -20,18 +20,18 @@ fn sema_does_not_export_slot() {
 }
 
 #[test]
-fn sema_does_not_export_legacy_slot_store() {
+fn memory_does_not_export_legacy_slot_store() {
     let source = lib_source();
     assert!(!source.contains("pub fn open(path: &Path)"));
     assert!(!source.contains("pub fn store(&self"));
     assert!(!source.contains("pub fn get(&self, slot"));
     assert!(!source.contains("pub fn iter(&self) -> Result<Vec<(Slot"));
-    assert!(!source.contains("__sema_records"));
+    assert!(!source.contains("__memory_records"));
     assert!(!source.contains("next_slot"));
 }
 
 #[test]
-fn sema_does_not_export_reader_count() {
+fn memory_does_not_export_reader_count() {
     let source = lib_source();
     assert!(!source.contains("DEFAULT_READER_COUNT"));
     assert!(!source.contains("pub fn reader_count"));

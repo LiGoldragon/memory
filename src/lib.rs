@@ -1,4 +1,4 @@
-//! sema — the workspace's typed-database kernel.
+//! memory — the workspace's typed-database kernel.
 //!
 //! redb-backed; values are rkyv-archived; tables are typed
 //! and version-guarded. This crate is the kernel; component-owned
@@ -6,12 +6,12 @@
 //! owns each database.
 //!
 //! See `ARCHITECTURE.md` for the role/boundaries; see
-//! `~/primary/reports/designer/63-sema-as-workspace-database-library.md`
+//! `~/primary/reports/designer/63-memory-as-workspace-database-library.md`
 //! for the design.
 //!
 //! ## Surface
 //!
-//! `Sema::open_with_schema(path, &Schema)` opens a typed database
+//! `Memory::open_with_schema(path, &Schema)` opens a typed database
 //! with a version-skew guard. `Table<K, V: Archive>` typed wrappers
 //! hide rkyv encode/decode at the table boundary. `read(|txn| ...)`
 //! and `write(|txn| ...)` keep redb transactions closure-scoped so
@@ -84,7 +84,7 @@ pub enum Error {
         found: SchemaVersion,
     },
     #[error(
-        "existing sema file at {} lacks a schema version — refusing to retro-stamp v{expected}; \
+        "existing memory file at {} lacks a schema version — refusing to retro-stamp v{expected}; \
          either migrate the file explicitly or open a fresh path",
         path.display()
     )]
@@ -144,14 +144,14 @@ impl DatabaseHeader {
     }
 }
 
-/// Endianness pinned into Sema's rkyv feature set.
+/// Endianness pinned into Memory's rkyv feature set.
 #[derive(Archive, Serialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[rkyv(derive(Debug))]
 pub enum RkyvEndian {
     Little,
 }
 
-/// Pointer width pinned into Sema's rkyv feature set.
+/// Pointer width pinned into Memory's rkyv feature set.
 #[derive(Archive, Serialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[rkyv(derive(Debug))]
 pub enum RkyvPointerWidth {
@@ -161,7 +161,7 @@ pub enum RkyvPointerWidth {
 // ─── Schema — kernel-mode open contract ─────────────────────
 
 /// A consumer's schema declaration: just the schema version
-/// today. Pass to [`Sema::open_with_schema`] at open time;
+/// today. Pass to [`Memory::open_with_schema`] at open time;
 /// the kernel writes the version on first open and refuses
 /// to open a file whose stored version doesn't match.
 ///
@@ -225,8 +225,8 @@ impl std::fmt::Display for SchemaVersion {
 /// Use through the closure-scoped txn helpers:
 ///
 /// ```ignore
-/// let message = sema.read(|txn| MESSAGES.get(&txn, "m-abc"))?;
-/// sema.write(|txn| MESSAGES.insert(&txn, "m-xyz", &new_message))?;
+/// let message = memory.read(|txn| MESSAGES.get(&txn, "m-abc"))?;
+/// memory.write(|txn| MESSAGES.insert(&txn, "m-xyz", &new_message))?;
 /// ```
 pub struct Table<K, V>
 where
@@ -271,7 +271,7 @@ where
 /// that yielded it.
 ///
 /// redb keys are often borrowed at read time (`&str`, `&[u8]`).
-/// Sema's table iteration methods eagerly collect rows and close
+/// Memory's table iteration methods eagerly collect rows and close
 /// the read transaction before returning, so those borrowed keys
 /// need an owned shape.
 pub trait OwnedTableKey: redb::Key + 'static {
@@ -461,20 +461,20 @@ where
     }
 }
 
-// ─── Sema — the database handle ─────────────────────────────
+// ─── Memory — the database handle ─────────────────────────────
 
-const META: TableDefinition<&str, u64> = TableDefinition::new("__sema_meta");
-const DATABASE_HEADERS: TableDefinition<&str, &[u8]> = TableDefinition::new("__sema_headers");
+const META: TableDefinition<&str, u64> = TableDefinition::new("__memory_meta");
+const DATABASE_HEADERS: TableDefinition<&str, &[u8]> = TableDefinition::new("__memory_headers");
 const DATABASE_HEADER_KEY: &str = "database";
 const SCHEMA_VERSION_KEY: &str = "schema_version";
 
-pub struct Sema {
+pub struct Memory {
     database: Database,
     path: PathBuf,
 }
 
-impl Sema {
-    /// Open or create a sema database at `path` with a
+impl Memory {
+    /// Open or create a memory database at `path` with a
     /// declared schema. The kernel writes the schema version
     /// on first open and hard-fails on mismatch.
     pub fn open_with_schema(path: &Path, schema: &Schema) -> Result<Self> {
@@ -501,7 +501,7 @@ impl Sema {
             // consumer's actual K and V.
         }
         transaction.commit()?;
-        Ok(Sema {
+        Ok(Memory {
             database,
             path: path.to_path_buf(),
         })
@@ -559,7 +559,7 @@ impl Sema {
     /// roll back (drop) on `Err`. The kernel-mode happy path:
     ///
     /// ```ignore
-    /// sema.write(|txn| {
+    /// memory.write(|txn| {
     ///     MESSAGES.insert(&txn, "m-abc", &message)?;
     ///     LOCKS.insert(&txn, "designer", &lock)?;
     ///     Ok(())

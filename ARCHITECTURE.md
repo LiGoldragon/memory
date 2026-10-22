@@ -1,30 +1,30 @@
-# ARCHITECTURE — sema
+# ARCHITECTURE — memory
 
-Sema is the workspace's typed storage kernel. It is a Rust
+Memory is the workspace's typed storage kernel. It is a Rust
 library over redb and rkyv. It opens a database file with an
 explicit schema, guards the rkyv database format, and provides
 typed table operations inside closure-scoped transactions.
 
-Sema is to state what `signal-core` is to wire: the small kernel of
+Memory is to state what `signal-core` is to wire: the small kernel of
 primitives that higher layers build on. Full database-operation
-execution lives in `sema-engine`, not in this crate.
+execution lives in `memory-engine`, not in this crate.
 
-The persistent typed-record store is named the **SEMA database** — not
-RAD or other nicknames. Sema is the workspace's pure binary domain-tree
-format; the redb-persisted records are conceptually a sema database. It
+The persistent typed-record store is named the **MEMORY database** — not
+RAD or other nicknames. Memory is the workspace's pure binary domain-tree
+format; the redb-persisted records are conceptually a memory database. It
 holds strings (quotes, names, summaries) today, and those reduce as
 natural language becomes typed leaves. Internal database logic uses the
 same schema-defined message language that component signals use, so a
 growing database component can later split into its own daemon without
 changing the language pattern.
 
-> **Scope.** Today's `sema` is the Rust-on-redb storage kernel.
-> The eventually-self-hosting `Sema` substrate (the universal
-> medium for meaning, Sema-on-Sema) is a different artifact at a
+> **Scope.** Today's `memory` is the Rust-on-redb storage kernel.
+> The eventually-self-hosting `Memory` substrate (the universal
+> medium for meaning, Memory-on-Memory) is a different artifact at a
 > different layer of the stack: it is what makes computation
-> itself content-addressable. Today's `sema` is a realization
+> itself content-addressable. Today's `memory` is a realization
 > step. The eventual versioning model — schema as content-
-> addressed Sema source, components carrying multiple versions
+> addressed Memory source, components carrying multiple versions
 > in runtime, translation as reducer work — is named in the
 > Versioning section below as **future work, not first-prototype
 > work**. See `~/primary/ARCHITECTURE.md` §"Workspace vision and intent".
@@ -34,15 +34,15 @@ changing the language pattern.
 The kernel owns:
 
 - The redb file lifecycle: create parent directories, open or create
-  the file, create sema-owned internal tables.
-- The database header guard: the file records Sema's rkyv format
+  the file, create memory-owned internal tables.
+- The database header guard: the file records Memory's rkyv format
   identity and refuses incompatible builds.
-- The schema-version guard: `Sema::open_with_schema(path, schema)`
+- The schema-version guard: `Memory::open_with_schema(path, schema)`
   writes the schema on first open and hard-fails on mismatch.
 - Closure-scoped transactions: `read(|transaction| ...)` and
   `write(|transaction| ...)`.
-- Public transaction type aliases: consumers name `sema::ReadTransaction`
-  / `sema::WriteTransaction`, not `redb` transaction types directly, so
+- Public transaction type aliases: consumers name `memory::ReadTransaction`
+  / `memory::WriteTransaction`, not `redb` transaction types directly, so
   higher layers can type local table reducers without adding their own
   `redb` dependency.
 - Typed tables: `Table<K, V>` hides rkyv encode/decode at the table
@@ -56,7 +56,7 @@ Consumers own:
 - Table layouts and schema constants.
 - Runtime ordering, actors, authorization, validation, subscriptions,
   and commit-before-effect policy.
-- Database-operation execution through `sema-engine`.
+- Database-operation execution through `memory-engine`.
 
 ## Boundary
 
@@ -65,12 +65,12 @@ component daemon
   owns actors, policy, validation, subscriptions, sockets
   |
   v
-sema-engine
+memory-engine
   owns Signal verb execution, query/mutation plans, catalog,
   operation log, snapshots, subscription delivery
   |
   v
-sema
+memory
   owns redb/rkyv typed table storage, schema guard,
   database-format guard, transaction helpers
   |
@@ -78,13 +78,13 @@ sema
 component.redb
 ```
 
-The dependency direction is one-way. `sema-engine` may depend on
-`sema`. `sema` must not depend on `sema-engine`, Signal contracts,
+The dependency direction is one-way. `memory-engine` may depend on
+`memory`. `memory` must not depend on `memory-engine`, Signal contracts,
 Kameo, tokio, NOTA, Nexus, Persona, or Criome.
 
 ## Non-Goals
 
-Sema does not own:
+Memory does not own:
 
 - Signal verbs or request routing.
 - Query planning, mutation planning, validation, operation logs,
@@ -96,34 +96,34 @@ Sema does not own:
 
 The retired raw-byte append path is intentionally absent. If a future
 engine needs append-only identity or sequence allocation, that lands
-as a typed `sema-engine` primitive with its own records and witnesses,
-not as a raw storage surface in `sema`.
+as a typed `memory-engine` primitive with its own records and witnesses,
+not as a raw storage surface in `memory`.
 
 ## Constraints
 
-- Sema opens durable state only through
-  `Sema::open_with_schema(path, schema)`.
-- Sema stores typed rkyv values through typed tables.
-- Sema has no schema-less public open path.
-- Sema has no raw byte store API.
-- Sema has no Criome read-pool configuration API.
-- Sema internal table names use the `__sema_` prefix.
-- Sema-owned internal tables are limited to kernel metadata and
+- Memory opens durable state only through
+  `Memory::open_with_schema(path, schema)`.
+- Memory stores typed rkyv values through typed tables.
+- Memory has no schema-less public open path.
+- Memory has no raw byte store API.
+- Memory has no Criome read-pool configuration API.
+- Memory internal table names use the `__memory_` prefix.
+- Memory-owned internal tables are limited to kernel metadata and
   database headers.
-- Component table names must not use the `__sema_` prefix.
+- Component table names must not use the `__memory_` prefix.
 - Table layout belongs to the component that owns the state.
 - Record Rust types live in Signal contract crates or component
-  domain crates, not in sema.
+  domain crates, not in memory.
 - Runtime ordering, actor mailboxes, commit-before-effect policy, and
   subscriptions belong to the consuming component or to
-  `sema-engine`.
+  `memory-engine`.
 
 ## Public Surface
 
 ```rust
-pub struct Sema;
+pub struct Memory;
 
-impl Sema {
+impl Memory {
     pub fn open_with_schema(path: &Path, schema: &Schema) -> Result<Self>;
     pub fn read<R>(&self, body: impl FnOnce(&ReadTransaction) -> Result<R>) -> Result<R>;
     pub fn write<R>(&self, body: impl FnOnce(&WriteTransaction) -> Result<R>) -> Result<R>;
@@ -159,7 +159,7 @@ last-committed / in-progress page pair. A consumer that might need a
 removed record back must capture it *before* calling `remove` — the
 kernel keeps nothing.
 
-This was confirmed empirically against a sema consumer (the
+This was confirmed empirically against a memory consumer (the
 persona-spirit intent store). Records removed one morning had their
 freed pages fully reclaimed within hours by ~74 later record writes: a
 forensic `strings` / byte scan of a read-only copy of the live database
@@ -170,13 +170,13 @@ already destroyed the content.
 
 Consequences for the layers above:
 
-- `sema-engine`'s `Retract` verb inherits this: a retracted record is
+- `memory-engine`'s `Retract` verb inherits this: a retracted record is
   unrecoverable from the file once later commits reclaim its pages.
 - Components whose records carry durable meaning (intent logs, audit
   trails) must treat removal as destructive and capture-before-remove,
   never relying on forensic recovery.
 - Recoverable deletion, where wanted, is a deliberate higher-layer
-  feature — a typed `sema-engine` tombstone/archive record, or a
+  feature — a typed `memory-engine` tombstone/archive record, or a
   transaction-coherent copy via redb's backup API or a filesystem
   copy-on-write snapshot — never an implicit property of the store.
 
@@ -188,9 +188,9 @@ best-effort unless a stronger retention class applies. When a record
 moves to the archive its privacy variable moves with it, preserved at
 the original privacy level, and archive reads honor the same explicit
 privacy discipline as the live store. The archive itself is a
-specialized sema-database holding exactly one kind of archived object —
+specialized memory-database holding exactly one kind of archived object —
 the database name states what it archives — paired with a small
-archive-retrieving tool. `sema-engine`'s `CollectRemovalCandidates`
+archive-retrieving tool. `memory-engine`'s `CollectRemovalCandidates`
 archives the records it collects to a default archive surface before
 hot-store removal, with typed retrieval rather than ad-hoc caller files;
 when composite intent retires its source records, the sources are
@@ -202,15 +202,15 @@ possible, not kernel behavior.
 
 ```text
 src/
-└── lib.rs    — Sema handle, schema/database header guards,
+└── lib.rs    — Memory handle, schema/database header guards,
                 closure-scoped transactions, Table<K, V>,
                 OwnedTableKey, Error
 ```
 
-Internal Sema tables:
+Internal Memory tables:
 
-- `__sema_headers`
-- `__sema_meta`
+- `__memory_headers`
+- `__memory_meta`
 
 ## Tests
 
@@ -226,9 +226,9 @@ nix flake check
 
 Load-bearing witnesses:
 
-- `sema_does_not_export_slot`
-- `sema_does_not_export_legacy_slot_store`
-- `sema_does_not_export_reader_count`
+- `memory_does_not_export_slot`
+- `memory_does_not_export_legacy_slot_store`
+- `memory_does_not_export_reader_count`
 - schema mismatch hard-fails at open
 - database format mismatch hard-fails at open
 - typed table scans return owned keys and values
@@ -236,22 +236,22 @@ Load-bearing witnesses:
 
 ## Status
 
-Package A of the sema / sema-engine split has **landed**: this crate
+Package A of the memory / memory-engine split has **landed**: this crate
 is the cleaned storage kernel (no `Slot`, no legacy raw-byte store,
 no `reader_count`, no schema-less open). The structural witnesses
-for those deletions exist. `sema-engine` has been created as a
+for those deletions exist. `memory-engine` has been created as a
 sibling library-only repository and is in active development; the
 first consumer migration (persona-mind) is in flight.
 
 Ongoing work for this crate is bounded: respond to engine-side
 discoveries that require kernel changes (per `~/primary/ARCHITECTURE.md`
-§"Workspace vision and intent" — `sema` may break to make the
+§"Workspace vision and intent" — `memory` may break to make the
 engine substrate beautiful). Most active development lives in
-`sema-engine`.
+`memory-engine`.
 
 ## Versioning — today and eventually
 
-Today, schema versioning is **manual**: `Sema::open_with_schema`
+Today, schema versioning is **manual**: `Memory::open_with_schema`
 takes an explicit `SchemaVersion` constant; the file records that
 version on first open and hard-fails on subsequent mismatches.
 Consumers bump the constant when their typed tables change shape,
@@ -260,11 +260,11 @@ recompile the consumer against the new schema, accept the data
 loss or run a one-off migrator). The format-identity guard is
 separate and protects against rkyv layout drift across builds.
 
-Eventually, when the workspace self-hosts on Sema-on-Sema (per
+Eventually, when the workspace self-hosts on Memory-on-Memory (per
 `~/primary/ARCHITECTURE.md` §"Workspace vision and intent"), versioning becomes
 **content-addressed**:
 
-- A schema is identified by the hash of its Sema source. Equal hash
+- A schema is identified by the hash of its Memory source. Equal hash
   ⇒ equal schema by construction; no separate `SchemaVersion`
   constant is needed.
 - A component's runtime can hold **multiple schema versions
@@ -272,7 +272,7 @@ Eventually, when the workspace self-hosts on Sema-on-Sema (per
   v3's typed shape; records archived under v4's hash decode through
   v4's. The catalog row carries the schema-hash, not a manually-
   assigned version number.
-- Migration becomes a **reducer**: a typed Sema function from
+- Migration becomes a **reducer**: a typed Memory function from
   v3-records to v4-records. The reducer runs over the v3 archive
   to produce a v4 archive; both can coexist in the same store
   under different schema-hash addresses until the v3 archive is
@@ -286,7 +286,7 @@ the kernel itself.
 ### Content-addressed migration — the engine-layer model
 
 The content-addressed model above resolves into a concrete migration
-design at the `sema-engine` / contract layer that the kernel serves.
+design at the `memory-engine` / contract layer that the kernel serves.
 These are engine-layer facts, recorded here because they fix what the
 kernel's typed-table storage must support:
 
@@ -299,7 +299,7 @@ kernel's typed-table storage must support:
   are written. `MigrationIndex` is the runtime decoder lookup; migration
   is per type; upgrade and downgrade are one compatibility-projection
   relation, not two mechanisms.
-- **Upgrades are typed SEMA operations.** A protocol or
+- **Upgrades are typed MEMORY operations.** A protocol or
   database-format change is itself a typed operation/message applied as
   database work, and that same operation is the source for derived
   datatype and upgrade/compatibility code. One library handles
@@ -321,18 +321,18 @@ kernel's typed-table storage must support:
 The content-addressed versioning and migration the kernel supports is
 the storage face of a larger goal: a **reusable component
 version-control system**, foundational to the whole meta-work. The
-facts below are system-level direction — they live in `sema-engine` and
+facts below are system-level direction — they live in `memory-engine` and
 its supporting libraries, not in this kernel — but they fix what the
 typed-table storage underneath must serve.
 
-- **Native version-controlled durability.** Component Sema databases
+- **Native version-controlled durability.** Component Memory databases
   (each component's durable daemon state) get native version-controlled,
   server-backed atomic durability with no state loss, built once as a
   reusable library of generic types and traits every component opts
   into. The design is Dolt-informed; strict-typed
   hard-migration-per-schema-change is the core constraint, with the
   exact generic mechanism settled by prior-art research.
-- **Full distributed-version-control semantics.** The system supports
+- **Full distributed-version-control memoryntics.** The system supports
   branching, forking, rebasing, and merging over the typed database,
   with per-component customizable intake, merge, and rebase policy: a
   default implementation plus a per-component override. For example,
@@ -340,7 +340,7 @@ typed-table storage underneath must serve.
   transforming each incoming entry.
 - **Operation log is authoritative; redb is a materialized view.** The
   versioned operation log is the authoritative source of truth for
-  component Sema state, and the redb store becomes a rebuildable
+  component Memory state, and the redb store becomes a rebuildable
   materialized view folded from the log. This kernel inversion is chosen
   for the first version-control implementation rather than deferred —
   which is why this kernel keeps no history of its own beyond redb's
@@ -352,7 +352,7 @@ typed-table storage underneath must serve.
   on the ouranos tailnet host serves every component store: it validates
   sequence continuity and the expected head, deduplicates idempotently,
   fsyncs before acking, and carries retention and privacy behind its
-  meta signal. Its own state is itself a sema-engine store.
+  meta signal. Its own state is itself a memory-engine store.
 - **Cross-host transport.** Cross-host component transport for the
   mirror is a tailnet-bound TCP listener in `triad-runtime`, reusing the
   length-prefixed frame codec, with peer identity as a typed closed sum
@@ -370,9 +370,9 @@ typed-table storage underneath must serve.
 
 **Status:** integrated into the brilliant macro library pattern per `reports/designer/326-v13-spirit-complete-schema-vision.md §3` (schemas as macro-pattern instance).
 
-**Role:** this crate is the storage kernel — the typed-value substrate `sema-engine` builds upon. Component schemas never reference `sema` directly; they reference `sema-engine`, which composes this kernel under the hood.
+**Role:** this crate is the storage kernel — the typed-value substrate `memory-engine` builds upon. Component schemas never reference `memory` directly; they reference `memory-engine`, which composes this kernel under the hood.
 
-**Integration target:** storage kernel; consumed by `sema-engine`. Under the schema-engine upgrade, this crate's surface does not change. The macro-emitted storage descriptors call into `sema-engine`'s typed-table API, which in turn calls into this kernel's typed-value primitives. The reducer-based migration model described above in the "future work" section becomes more natural under the schema-engine upgrade: the schema language gives `.schema` files first-class schema-hash identity, and reducers between two schema-hash versions become regular schema-declared transformations the macro can emit code for.
+**Integration target:** storage kernel; consumed by `memory-engine`. Under the schema-engine upgrade, this crate's surface does not change. The macro-emitted storage descriptors call into `memory-engine`'s typed-table API, which in turn calls into this kernel's typed-value primitives. The reducer-based migration model described above in the "future work" section becomes more natural under the schema-engine upgrade: the schema language gives `.schema` files first-class schema-hash identity, and reducers between two schema-hash versions become regular schema-declared transformations the macro can emit code for.
 
 **References:**
 - `reports/designer/326-v13-spirit-complete-schema-vision.md` — schema language + macro pattern

@@ -1,5 +1,5 @@
 {
-  description = "sema — workspace typed-database kernel (redb + rkyv + version-skew guard)";
+  description = "memory — workspace typed-database kernel (redb + rkyv + version-skew guard)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -32,7 +32,7 @@
         };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
         scriptApplication = name: script: pkgs.writeShellApplication {
-          name = "sema-${name}";
+          name = "memory-${name}";
           runtimeInputs = [
             toolchain
           ];
@@ -60,32 +60,32 @@
         apps = {
           default = {
             type = "app";
-            program = "${testScript}/bin/sema-test";
-            meta.description = "Run sema's full test suite";
+            program = "${testScript}/bin/memory-test";
+            meta.description = "Run memory's full test suite";
           };
 
           test = {
             type = "app";
-            program = "${testScript}/bin/sema-test";
-            meta.description = "Run sema's full test suite";
+            program = "${testScript}/bin/memory-test";
+            meta.description = "Run memory's full test suite";
           };
 
           test-doc = {
             type = "app";
-            program = "${testDocScript}/bin/sema-test-doc";
-            meta.description = "Run sema's documentation tests";
+            program = "${testDocScript}/bin/memory-test-doc";
+            meta.description = "Run memory's documentation tests";
           };
 
           test-kernel-surface = {
             type = "app";
-            program = "${testKernelSurfaceScript}/bin/sema-test-kernel-surface";
-            meta.description = "Run sema's typed-kernel integration tests";
+            program = "${testKernelSurfaceScript}/bin/memory-test-kernel-surface";
+            meta.description = "Run memory's typed-kernel integration tests";
           };
 
           test-no-legacy-surface = {
             type = "app";
-            program = "${testNoLegacySurfaceScript}/bin/sema-test-no-legacy-surface";
-            meta.description = "Run sema's retired-surface absence witnesses";
+            program = "${testNoLegacySurfaceScript}/bin/memory-test-no-legacy-surface";
+            meta.description = "Run memory's retired-surface absence witnesses";
           };
         };
 
@@ -131,7 +131,7 @@
           # ─── Documentation builds without warnings ────────────
           # rustdoc catches broken intra-doc links, missing
           # references, malformed `[`...`]` brackets in prose.
-          # Sema's API surface IS partly documentation (the
+          # Memory's API surface IS partly documentation (the
           # `Schema` and `Table<K, V>` examples drive consumer
           # crates).
           doc = craneLib.cargoDoc (commonArgs // {
@@ -153,7 +153,7 @@
         };
 
         devShells.default = pkgs.mkShell {
-          name = "sema";
+          name = "memory";
           packages = [
             pkgs.jujutsu
             pkgs.pkg-config

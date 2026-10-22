@@ -53,7 +53,7 @@
 # - github.org
 # - github.repo
 
-sync.remote: "git+ssh://git@github.com/LiGoldragon/sema.git"
+sync.remote: "git+ssh://git@github.com/LiGoldragon/memory.git"
 
 dolt.shared-server: false
 
