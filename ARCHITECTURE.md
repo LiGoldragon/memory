@@ -332,7 +332,7 @@ typed-table storage underneath must serve.
   into. The design is Dolt-informed; strict-typed
   hard-migration-per-schema-change is the core constraint, with the
   exact generic mechanism settled by prior-art research.
-- **Full distributed-version-control memoryntics.** The system supports
+- **Full distributed-version-control semantics.** The system supports
   branching, forking, rebasing, and merging over the typed database,
   with per-component customizable intake, merge, and rebase policy: a
   default implementation plus a per-component override. For example,
