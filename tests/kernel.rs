@@ -4,11 +4,11 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use memory::{
+    DatabaseHeader, Error, Memory, RkyvEndian, RkyvPointerWidth, Schema, SchemaVersion, Table,
+};
 use redb::{ReadableDatabase, TableDefinition, TableHandle};
 use rkyv::{Archive, Deserialize, Serialize};
-use memory::{
-    DatabaseHeader, Error, RkyvEndian, RkyvPointerWidth, Schema, SchemaVersion, Memory, Table,
-};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -210,7 +210,8 @@ fn typed_tables_can_use_arbitrary_key_types() {
         name: "u64-keyed".to_string(),
         value: 100,
     };
-    memory.write(|txn| KEYED_BY_U64.insert(txn, 42u64, &toy))
+    memory
+        .write(|txn| KEYED_BY_U64.insert(txn, 42u64, &toy))
         .unwrap();
     let read_back = memory
         .read(|txn| KEYED_BY_U64.get(txn, 42u64))
@@ -223,7 +224,10 @@ fn typed_tables_can_use_arbitrary_key_types() {
         value: 200,
     };
     memory.write(|txn| TOYS.insert(txn, "k", &other)).unwrap();
-    assert_eq!(memory.read(|txn| TOYS.get(txn, "k")).unwrap().unwrap(), other);
+    assert_eq!(
+        memory.read(|txn| TOYS.get(txn, "k")).unwrap().unwrap(),
+        other
+    );
     let _ = std::fs::remove_file(&path);
 }
 
@@ -235,7 +239,9 @@ fn typed_table_round_trips_value() {
         name: "first".to_string(),
         value: 42,
     };
-    memory.write(|txn| TOYS.insert(txn, "k1", &original)).unwrap();
+    memory
+        .write(|txn| TOYS.insert(txn, "k1", &original))
+        .unwrap();
     let read_back = memory
         .read(|txn| TOYS.get(txn, "k1"))
         .unwrap()
@@ -270,13 +276,14 @@ fn typed_table_iter_returns_owned_keys_and_values_in_key_order() {
         name: "third".to_string(),
         value: 3,
     };
-    memory.write(|txn| {
-        TOYS.insert(txn, "c", &third)?;
-        TOYS.insert(txn, "a", &first)?;
-        TOYS.insert(txn, "b", &second)?;
-        Ok(())
-    })
-    .unwrap();
+    memory
+        .write(|txn| {
+            TOYS.insert(txn, "c", &third)?;
+            TOYS.insert(txn, "a", &first)?;
+            TOYS.insert(txn, "b", &second)?;
+            Ok(())
+        })
+        .unwrap();
     let rows = memory.read(|txn| TOYS.iter(txn)).unwrap();
     assert_eq!(
         rows,
@@ -336,12 +343,13 @@ fn typed_table_iter_returns_empty_when_table_is_missing() {
 fn invalid_rkyv_value_fails_loudly_with_table_context() {
     let path = temp_path();
     let memory = Memory::open_with_schema(&path, &SCHEMA_V1).unwrap();
-    memory.write(|txn| {
-        let mut table = txn.open_table(TableDefinition::<&str, &[u8]>::new("toys"))?;
-        table.insert("bad", b"".as_slice())?;
-        Ok(())
-    })
-    .unwrap();
+    memory
+        .write(|txn| {
+            let mut table = txn.open_table(TableDefinition::<&str, &[u8]>::new("toys"))?;
+            table.insert("bad", b"".as_slice())?;
+            Ok(())
+        })
+        .unwrap();
     let result = memory.read(|txn| TOYS.get(txn, "bad"));
     match result {
         Err(Error::RkyvDecode { table, .. }) => assert_eq!(table, "toys"),

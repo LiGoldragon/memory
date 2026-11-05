@@ -43,7 +43,6 @@
         testScript = scriptApplication "test" ./scripts/test;
         testDocScript = scriptApplication "test-doc" ./scripts/test-doc;
         testKernelSurfaceScript = scriptApplication "test-kernel-surface" ./scripts/test-kernel-surface;
-        testNoLegacySurfaceScript = scriptApplication "test-no-legacy-surface" ./scripts/test-no-legacy-surface;
       in
       {
         packages = {
@@ -54,7 +53,6 @@
           test = testScript;
           test-doc = testDocScript;
           test-kernel-surface = testKernelSurfaceScript;
-          test-no-legacy-surface = testNoLegacySurfaceScript;
         };
 
         apps = {
@@ -81,12 +79,6 @@
             program = "${testKernelSurfaceScript}/bin/memory-test-kernel-surface";
             meta.description = "Run memory's typed-kernel integration tests";
           };
-
-          test-no-legacy-surface = {
-            type = "app";
-            program = "${testNoLegacySurfaceScript}/bin/memory-test-no-legacy-surface";
-            meta.description = "Run memory's retired-surface absence witnesses";
-          };
         };
 
         checks = {
@@ -98,8 +90,6 @@
 
           # ─── Default test surface ─────────────────────────────
           # `cargo test` — runs every test target end to end.
-          # Includes the kernel-surface tests and retired-surface
-          # absence witnesses in one pass.
           test = craneLib.cargoTest (commonArgs // {
             inherit cargoArtifacts;
           });
@@ -107,10 +97,6 @@
           # ─── Per-file integration test runs ──────────────────
           # Each integration test file gets its own check so a
           # failure surfaces named, not buried.
-          test-no-legacy-surface = craneLib.cargoTest (commonArgs // {
-            inherit cargoArtifacts;
-            cargoTestExtraArgs = "--test no_legacy_surface";
-          });
 
           test-kernel-surface = craneLib.cargoTest (commonArgs // {
             inherit cargoArtifacts;
