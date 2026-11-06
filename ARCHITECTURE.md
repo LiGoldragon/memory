@@ -140,8 +140,32 @@ impl<K, V> Table<K, V> {
     pub fn remove(&self, transaction: &WriteTransaction, key: K) -> Result<bool>;
     pub fn iter(&self, transaction: &ReadTransaction) -> Result<Vec<(K::Owned, V)>>;
     pub fn range<R>(&self, transaction: &ReadTransaction, range: R) -> Result<Vec<(K::Owned, V)>>;
+    pub fn rename_from(&self, transaction: &WriteTransaction, previous: &str) -> Result<bool>;
+}
+
+pub struct SemaFile;
+
+impl SemaFile {
+    pub fn open(path: &Path) -> Result<Self>;
+    pub fn read<R>(&self, body: impl FnOnce(&ReadTransaction) -> Result<R>) -> Result<R>;
+    pub fn convert<R>(self, conversion: impl FnOnce(&WriteTransaction) -> Result<R>) -> Result<R>;
+    pub fn path(&self) -> &Path;
 }
 ```
+
+## Converting a sema file
+
+The kernel was named `sema` before it was named Memory; a file it wrote
+then holds `__sema_meta` and `__sema_headers`. `SemaFile::open` opens such
+a file read-only, checks its database header, and refuses a file without
+`__sema_meta` (`NotSemaFile`) or one already holding `__memory_meta`
+(`AlreadyMemoryFile`). A consumer reads its own legacy tables through
+`SemaFile::read`, decides, and then `SemaFile::convert` runs one write
+transaction: the two kernel tables take their `__memory_` names and the
+consumer's closure renames (`Table::rename_from`) and rewrites its own
+tables in the same transaction. It commits only when every step
+succeeds. Opening and reading write nothing, so a conversion the consumer
+refuses before `convert` leaves the file byte for byte as it was.
 
 ## Deletion durability — copy-on-write page reuse
 

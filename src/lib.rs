@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 use std::ops::RangeBounds;
 use std::path::{Path, PathBuf};
 
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Database, ReadOnlyDatabase, ReadableDatabase, ReadableTable, TableDefinition};
 pub use redb::{ReadTransaction, WriteTransaction};
 use rkyv::api::high::HighDeserializer;
 use rkyv::bytecheck::CheckBytes;
@@ -92,6 +92,10 @@ pub enum Error {
         path: PathBuf,
         expected: SchemaVersion,
     },
+    #[error("{} holds no __sema_meta table; it is not a sema file", path.display())]
+    NotSemaFile { path: PathBuf },
+    #[error("{} already holds __memory_meta; it is a memory file", path.display())]
+    AlreadyMemoryFile { path: PathBuf },
 }
 
 impl From<rancor::Error> for Error {
@@ -264,6 +268,18 @@ where
     pub fn ensure(&self, txn: &WriteTransaction) -> Result<()> {
         let _table = txn.open_table(self.definition())?;
         Ok(())
+    }
+
+    /// Move the table stored under `previous` to this table's name,
+    /// rows and all. Answers whether a table stood under `previous`;
+    /// refuses when a table already stands under this name.
+    pub fn rename_from(&self, txn: &WriteTransaction, previous: &str) -> Result<bool> {
+        let previous = TableDefinition::<K, &[u8]>::new(previous);
+        match txn.rename_table(previous, self.definition()) {
+            Ok(()) => Ok(true),
+            Err(redb::TableError::TableDoesNotExist(_)) => Ok(false),
+            Err(other) => Err(other.into()),
+        }
     }
 }
 
@@ -577,5 +593,95 @@ impl Memory {
     pub fn read<R>(&self, body: impl FnOnce(&ReadTransaction) -> Result<R>) -> Result<R> {
         let txn = self.database.begin_read()?;
         body(&txn)
+    }
+}
+
+// ─── SemaFile — a file written under the kernel's former name ─
+
+const SEMA_META: TableDefinition<&str, u64> = TableDefinition::new("__sema_meta");
+const SEMA_HEADERS: TableDefinition<&str, &[u8]> = TableDefinition::new("__sema_headers");
+
+/// A database file the kernel wrote under its former name, `sema`:
+/// its metadata and header tables are `__sema_meta` and
+/// `__sema_headers`. It is held read-only until [`SemaFile::convert`],
+/// so a conversion its consumer refuses never writes to the file.
+pub struct SemaFile {
+    database: ReadOnlyDatabase,
+    path: PathBuf,
+}
+
+impl SemaFile {
+    /// Open an existing sema file read-only. Refuses a file without
+    /// `__sema_meta`, a file that already holds `__memory_meta`, and a
+    /// file whose header names another rkyv format.
+    pub fn open(path: &Path) -> Result<Self> {
+        let database = ReadOnlyDatabase::open(path)?;
+        let transaction = database.begin_read()?;
+        match transaction.open_table(META) {
+            Ok(_) => {
+                return Err(Error::AlreadyMemoryFile {
+                    path: path.to_path_buf(),
+                });
+            }
+            Err(redb::TableError::TableDoesNotExist(_)) => {}
+            Err(other) => return Err(other.into()),
+        }
+        match transaction.open_table(SEMA_META) {
+            Ok(_) => {}
+            Err(redb::TableError::TableDoesNotExist(_)) => {
+                return Err(Error::NotSemaFile {
+                    path: path.to_path_buf(),
+                });
+            }
+            Err(other) => return Err(other.into()),
+        }
+        let headers = transaction.open_table(SEMA_HEADERS)?;
+        let expected = DatabaseHeader::current();
+        let found = match headers.get(DATABASE_HEADER_KEY)? {
+            Some(stored) => rkyv::from_bytes::<DatabaseHeader, rancor::Error>(stored.value())
+                .map_err(|source| Error::DatabaseHeaderDecode { source })?,
+            None => {
+                return Err(Error::NotSemaFile {
+                    path: path.to_path_buf(),
+                });
+            }
+        };
+        if found != expected {
+            return Err(Error::DatabaseFormatMismatch { expected, found });
+        }
+        drop(headers);
+        drop(transaction);
+        Ok(Self {
+            database,
+            path: path.to_path_buf(),
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Run a closure in a read transaction over the file as it stands.
+    pub fn read<R>(&self, body: impl FnOnce(&ReadTransaction) -> Result<R>) -> Result<R> {
+        let txn = self.database.begin_read()?;
+        body(&txn)
+    }
+
+    /// Convert the file to a memory file in one write transaction:
+    /// `__sema_meta` and `__sema_headers` become `__memory_meta` and
+    /// `__memory_headers`, and `conversion` runs in the same
+    /// transaction for the consumer's own tables. The transaction
+    /// commits only when both succeed; on any error the file stays a
+    /// sema file.
+    pub fn convert<R>(self, conversion: impl FnOnce(&WriteTransaction) -> Result<R>) -> Result<R> {
+        let Self { database, path } = self;
+        drop(database);
+        let database = Database::open(&path)?;
+        let txn = database.begin_write()?;
+        txn.rename_table(SEMA_META, META)?;
+        txn.rename_table(SEMA_HEADERS, DATABASE_HEADERS)?;
+        let result = conversion(&txn)?;
+        txn.commit()?;
+        Ok(result)
     }
 }
