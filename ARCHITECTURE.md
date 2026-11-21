@@ -140,8 +140,15 @@ impl<K, V> Table<K, V> {
     pub fn remove(&self, transaction: &WriteTransaction, key: K) -> Result<bool>;
     pub fn iter(&self, transaction: &ReadTransaction) -> Result<Vec<(K::Owned, V)>>;
     pub fn range<R>(&self, transaction: &ReadTransaction, range: R) -> Result<Vec<(K::Owned, V)>>;
+    pub fn visit_range<R>(&self, transaction: &ReadTransaction, range: R, visit: impl FnMut(RangeEntry<K, V>) -> Result<ControlFlow<()>>) -> Result<()>;
 }
 ```
+
+`visit_range` traverses in redb key order and gives the visitor an owned key
+with a deferred, typed decode. The visitor may skip that decode or stop the
+range immediately. It keeps the kernel's typed boundary: archived bytes stay
+private to `RangeEntry`, and decoding retains ordinary validation and table
+error context.
 
 ## Deletion durability — copy-on-write page reuse
 
@@ -232,6 +239,7 @@ Load-bearing witnesses:
 - schema mismatch hard-fails at open
 - database format mismatch hard-fails at open
 - typed table scans return owned keys and values
+- range visitors can skip value decoding and stop an ordered range early
 - write transactions roll back on typed errors
 
 ## Status

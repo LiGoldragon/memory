@@ -1,6 +1,7 @@
 //! Kernel-mode tests — exercise the Schema / Table&lt;K, V&gt; /
 //! version-guard surface consumed by component-owned Sema layers.
 
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -319,6 +320,129 @@ fn typed_table_range_returns_owned_keys_and_values_in_key_order() {
                 }
             ),
         ]
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn typed_table_range_visitor_can_skip_decode_and_preserve_order() {
+    let path = temp_path();
+    let sema = Sema::open_with_schema(&path, &SCHEMA_V1).unwrap();
+    sema.write(|txn| {
+        TOYS.insert(
+            txn,
+            "a",
+            &ToyRecord {
+                name: "a".into(),
+                value: 1,
+            },
+        )?;
+        TOYS.insert(
+            txn,
+            "c",
+            &ToyRecord {
+                name: "c".into(),
+                value: 3,
+            },
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    sema.write(|txn| {
+        let mut rows = txn.open_table(TableDefinition::<&str, &[u8]>::new("toys"))?;
+        rows.insert("b", b"not-an-archive".as_slice())?;
+        Ok(())
+    })
+    .unwrap();
+
+    let mut visited = 0;
+    let mut decoded = 0;
+    let mut rows = Vec::new();
+    sema.read(|txn| {
+        TOYS.visit_range(txn, "a"..="c", |entry| {
+            visited += 1;
+            if entry.key() == "b" {
+                return Ok(ControlFlow::Continue(()));
+            }
+            let row = entry.decode()?;
+            decoded += 1;
+            rows.push(row);
+            Ok(ControlFlow::Continue(()))
+        })
+    })
+    .unwrap();
+
+    assert_eq!(visited, 3);
+    assert_eq!(decoded, 2);
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "a".to_string(),
+                ToyRecord {
+                    name: "a".into(),
+                    value: 1,
+                },
+            ),
+            (
+                "c".to_string(),
+                ToyRecord {
+                    name: "c".into(),
+                    value: 3,
+                },
+            ),
+        ]
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn typed_table_range_visitor_stops_before_later_decode_errors() {
+    let path = temp_path();
+    let sema = Sema::open_with_schema(&path, &SCHEMA_V1).unwrap();
+    sema.write(|txn| {
+        TOYS.insert(
+            txn,
+            "a",
+            &ToyRecord {
+                name: "a".into(),
+                value: 1,
+            },
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    sema.write(|txn| {
+        let mut rows = txn.open_table(TableDefinition::<&str, &[u8]>::new("toys"))?;
+        rows.insert("b", b"not-an-archive".as_slice())?;
+        Ok(())
+    })
+    .unwrap();
+
+    let mut visited = 0;
+    let mut decoded = 0;
+    let mut rows = Vec::new();
+    sema.read(|txn| {
+        TOYS.visit_range(txn, "a"..="z", |entry| {
+            visited += 1;
+            rows.push(entry.decode()?);
+            decoded += 1;
+            Ok(ControlFlow::Break(()))
+        })
+    })
+    .unwrap();
+
+    assert_eq!(visited, 1);
+    assert_eq!(decoded, 1);
+    assert_eq!(
+        rows,
+        vec![(
+            "a".to_string(),
+            ToyRecord {
+                name: "a".into(),
+                value: 1,
+            },
+        )]
     );
     let _ = std::fs::remove_file(&path);
 }
