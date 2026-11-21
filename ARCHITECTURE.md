@@ -46,7 +46,9 @@ The kernel owns:
   higher layers can type local table reducers without adding their own
   `redb` dependency.
 - Typed tables: `Table<K, V>` hides rkyv encode/decode at the table
-  boundary and returns owned rows from scans.
+  boundary and returns owned rows from scans. Its ordered-range visitor can
+  defer decoding each row and stop traversal at the caller's selected
+  boundary.
 - The crate `Error` enum for kernel failures.
 
 Consumers own:

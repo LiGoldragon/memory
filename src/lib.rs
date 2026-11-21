@@ -19,7 +19,7 @@
 //! boundaries.
 
 use std::marker::PhantomData;
-use std::ops::RangeBounds;
+use std::ops::{ControlFlow, RangeBounds};
 use std::path::{Path, PathBuf};
 
 use redb::{Database, ReadOnlyDatabase, ReadableDatabase, ReadableTable, TableDefinition};
@@ -358,6 +358,42 @@ impl<const LENGTH: usize> OwnedTableKey for &'static [u8; LENGTH] {
     }
 }
 
+/// One ordered table-range entry whose value is decoded only when requested.
+///
+/// The entry is valid only during the range visitor call. Its key is owned;
+/// its archived value remains borrowed from the read transaction until
+/// [`Self::decode`] is called.
+pub struct RangeEntry<'entry, K, V>
+where
+    K: OwnedTableKey,
+{
+    table: &'entry Table<K, V>,
+    key: K::Owned,
+    bytes: &'entry [u8],
+}
+
+impl<K, V> RangeEntry<'_, K, V>
+where
+    K: OwnedTableKey,
+    V: Archive
+        + for<'a> Serialize<Strategy<Serializer<AlignedVec, ArenaHandle<'a>, Share>, rancor::Error>>,
+    V::Archived: RkyvDeserialize<V, HighDeserializer<rancor::Error>>
+        + for<'b> CheckBytes<
+            Strategy<Validator<ArchiveValidator<'b>, SharedValidator>, rancor::Error>,
+        >,
+{
+    /// The current row's owned key, in redb key order.
+    pub fn key(&self) -> &K::Owned {
+        &self.key
+    }
+
+    /// Decode the archived value and return it with its owned key.
+    pub fn decode(self) -> Result<(K::Owned, V)> {
+        let value = self.table.decode_value(self.bytes)?;
+        Ok((self.key, value))
+    }
+}
+
 impl<K, V> Table<K, V>
 where
     K: redb::Key + 'static,
@@ -467,6 +503,45 @@ where
             ));
         }
         Ok(rows)
+    }
+
+    /// Visit typed rows whose keys fall inside `range`, in redb key order.
+    ///
+    /// Each visitor receives an owned key and a deferred typed value. The
+    /// visitor may skip decoding an entry, or return `ControlFlow::Break(())`
+    /// to stop the ordered scan immediately. This lets callers merge their
+    /// own ordered overlay before decoding a committed value and lets bounded
+    /// readers stop without materializing the rest of the range.
+    ///
+    /// The entry may not outlive the visitor call. Values are decoded with
+    /// this table's normal rkyv validation and table-specific error context.
+    pub fn visit_range<'range, KeyRange>(
+        &self,
+        txn: &ReadTransaction,
+        range: impl RangeBounds<KeyRange> + 'range,
+        mut visit: impl for<'entry> FnMut(RangeEntry<'entry, K, V>) -> Result<ControlFlow<()>>,
+    ) -> Result<()>
+    where
+        K: OwnedTableKey,
+        KeyRange: std::borrow::Borrow<K::SelfType<'range>> + 'range,
+    {
+        let table = match txn.open_table(self.definition()) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(()),
+            Err(other) => return Err(other.into()),
+        };
+        for entry in table.range(range)? {
+            let (key, bytes) = entry?;
+            let control = visit(RangeEntry {
+                table: self,
+                key: K::owned_key(key.value()),
+                bytes: bytes.value(),
+            })?;
+            if control.is_break() {
+                break;
+            }
+        }
+        Ok(())
     }
 
     fn decode_value(&self, bytes: &[u8]) -> Result<V> {
