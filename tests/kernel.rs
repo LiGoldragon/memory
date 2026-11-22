@@ -559,22 +559,32 @@ fn schema_path_creates_parent_directories() {
 fn conditional_write_reads_its_transaction_and_abort_discards_it() {
     let path = temp_path();
     let sema = Sema::open_with_schema(&path, &SCHEMA_V1).unwrap();
-    let row = ToyRecord { name: "row".into(), value: 1 };
-    let result = sema.write_conditional(|txn| {
-        assert_eq!(TOYS.get_in_write(txn, "key")?, None);
-        TOYS.insert(txn, "key", &row)?;
-        assert_eq!(TOYS.get_in_write(txn, "key")?, Some(row.clone()));
-        Ok(ControlFlow::<(), ()>::Break(()))
-    }).unwrap();
+    let row = ToyRecord {
+        name: "row".into(),
+        value: 1,
+    };
+    let result = sema
+        .write_conditional(|txn| {
+            assert_eq!(TOYS.get_in_write(txn, "key")?, None);
+            TOYS.insert(txn, "key", &row)?;
+            assert_eq!(TOYS.get_in_write(txn, "key")?, Some(row.clone()));
+            Ok(ControlFlow::<(), ()>::Break(()))
+        })
+        .unwrap();
     assert!(matches!(result, ControlFlow::Break(())));
     assert_eq!(sema.read(|txn| TOYS.get(txn, "key")).unwrap(), None);
-    let _ = sema.write_conditional(|txn| {
-        TOYS.insert(txn, "key", &row)?;
-        Ok(ControlFlow::<(), ()>::Continue(()))
-    }).unwrap();
+    let _ = sema
+        .write_conditional(|txn| {
+            TOYS.insert(txn, "key", &row)?;
+            Ok(ControlFlow::<(), ()>::Continue(()))
+        })
+        .unwrap();
     drop(sema);
     let reopened = Sema::open_with_schema(&path, &SCHEMA_V1).unwrap();
-    assert_eq!(reopened.read(|txn| TOYS.get(txn, "key")).unwrap(), Some(row));
+    assert_eq!(
+        reopened.read(|txn| TOYS.get(txn, "key")).unwrap(),
+        Some(row)
+    );
     drop(reopened);
     let _ = std::fs::remove_file(path);
 }
@@ -583,12 +593,18 @@ fn conditional_write_reads_its_transaction_and_abort_discards_it() {
 fn conditional_write_reports_body_failure_and_rolls_back() {
     let path = temp_path();
     let sema = Sema::open_with_schema(&path, &SCHEMA_V1).unwrap();
-    let row = ToyRecord { name: "row".into(), value: 1 };
+    let row = ToyRecord {
+        name: "row".into(),
+        value: 1,
+    };
     let outcome = sema.write_conditional(|txn| {
         TOYS.insert(txn, "key", &row)?;
         Err::<ControlFlow<(), ()>, _>(Error::Io(std::io::Error::other("injected body failure")))
     });
-    assert!(matches!(outcome, Err(sema::WriteFailure::BeforeCommit(Error::Io(_)))));
+    assert!(matches!(
+        outcome,
+        Err(sema::WriteFailure::BeforeCommit(Error::Io(_)))
+    ));
     assert_eq!(sema.read(|txn| TOYS.get(txn, "key")).unwrap(), None);
     drop(sema);
     let _ = std::fs::remove_file(path);

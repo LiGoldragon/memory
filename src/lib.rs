@@ -421,7 +421,9 @@ where
         key: impl std::borrow::Borrow<K::SelfType<'txn>>,
     ) -> Result<Option<V>> {
         let table = txn.open_table(self.definition())?;
-        let Some(guard) = table.get(key)? else { return Ok(None); };
+        let Some(guard) = table.get(key)? else {
+            return Ok(None);
+        };
         Ok(Some(self.decode_value(guard.value())?))
     }
 
@@ -674,12 +676,19 @@ impl Sema {
     }
 
     /// Abort on Break, or commit on Continue, retaining the failure phase.
-    pub fn write_conditional<R, A>(&self, body: impl FnOnce(&WriteTransaction) -> Result<ControlFlow<A, R>>) -> std::result::Result<ControlFlow<A, R>, WriteFailure> {
-        let txn = self.database.begin_write().map_err(|error| WriteFailure::BeforeCommit(error.into()))?;
+    pub fn write_conditional<R, A>(
+        &self,
+        body: impl FnOnce(&WriteTransaction) -> Result<ControlFlow<A, R>>,
+    ) -> std::result::Result<ControlFlow<A, R>, WriteFailure> {
+        let txn = self
+            .database
+            .begin_write()
+            .map_err(|error| WriteFailure::BeforeCommit(error.into()))?;
         match body(&txn).map_err(WriteFailure::BeforeCommit)? {
             ControlFlow::Break(aborted) => Ok(ControlFlow::Break(aborted)),
             ControlFlow::Continue(result) => {
-                txn.commit().map_err(|error| WriteFailure::Commit(error.into()))?;
+                txn.commit()
+                    .map_err(|error| WriteFailure::Commit(error.into()))?;
                 Ok(ControlFlow::Continue(result))
             }
         }
