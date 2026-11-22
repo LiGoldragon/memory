@@ -139,6 +139,7 @@ impl<K, V> Table<K, V> {
     pub fn insert(&self, transaction: &WriteTransaction, key: K, value: &V) -> Result<()>;
     pub fn remove(&self, transaction: &WriteTransaction, key: K) -> Result<bool>;
     pub fn iter(&self, transaction: &ReadTransaction) -> Result<Vec<(K::Owned, V)>>;
+    pub fn rows_in_write_transaction(&self, transaction: &WriteTransaction) -> Result<Vec<(K::Owned, V)>>;
     pub fn range<R>(&self, transaction: &ReadTransaction, range: R) -> Result<Vec<(K::Owned, V)>>;
     pub fn visit_range<R>(&self, transaction: &ReadTransaction, range: R, visit: impl FnMut(RangeEntry<K, V>) -> Result<ControlFlow<()>>) -> Result<()>;
 }
@@ -149,6 +150,16 @@ with a deferred, typed decode. The visitor may skip that decode or stop the
 range immediately. It keeps the kernel's typed boundary: archived bytes stay
 private to `RangeEntry`, and decoding retains ordinary validation and table
 error context.
+
+`rows_in_write_transaction` scans the full typed table from the writer's
+transaction, including its own pending writes. An absent table yields an
+empty scan without materializing it. The ordinary typed validation still
+applies to existing tables and values.
+
+`Sema::write_with_disposition` lets the body explicitly commit or discard.
+It reports transaction opening, body/abort, explicit discard, and commit
+failure separately. A tentative value returned with a commit failure
+describes the attempted write; only a successful commit makes it durable.
 
 ## Deletion durability — copy-on-write page reuse
 

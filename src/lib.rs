@@ -22,7 +22,9 @@ use std::marker::PhantomData;
 use std::ops::{ControlFlow, RangeBounds};
 use std::path::{Path, PathBuf};
 
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{
+    Database, MultimapTableHandle, ReadableDatabase, ReadableTable, TableDefinition, TableHandle,
+};
 pub use redb::{ReadTransaction, WriteTransaction};
 use rkyv::api::high::HighDeserializer;
 use rkyv::bytecheck::CheckBytes;
@@ -451,6 +453,32 @@ where
             Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
             Err(other) => return Err(other.into()),
         };
+        self.decode_rows(&table)
+    }
+
+    /// Snapshot every typed row while the caller holds the writer transaction.
+    /// This sees that transaction's own writes and leaves an absent table absent.
+    pub fn rows_in_write_transaction(&self, txn: &WriteTransaction) -> Result<Vec<(K::Owned, V)>>
+    where
+        K: OwnedTableKey,
+    {
+        if !txn.list_tables()?.any(|table| table.name() == self.name)
+            && !txn
+                .list_multimap_tables()?
+                .any(|table| table.name() == self.name)
+        {
+            return Ok(Vec::new());
+        }
+        self.decode_rows(&txn.open_table(self.definition())?)
+    }
+
+    fn decode_rows(
+        &self,
+        table: &impl ReadableTable<K, &'static [u8]>,
+    ) -> Result<Vec<(K::Owned, V)>>
+    where
+        K: OwnedTableKey,
+    {
         let mut rows = Vec::new();
         for entry in table.iter()? {
             let (key_guard, bytes_guard) = entry?;
@@ -550,6 +578,37 @@ const META: TableDefinition<&str, u64> = TableDefinition::new("__sema_meta");
 const DATABASE_HEADERS: TableDefinition<&str, &[u8]> = TableDefinition::new("__sema_headers");
 const DATABASE_HEADER_KEY: &str = "database";
 const SCHEMA_VERSION_KEY: &str = "schema_version";
+
+/// The transaction body's decision after it has examined the writer's view.
+#[derive(Debug)]
+pub enum WriteDecision<CommitValue, DiscardValue> {
+    Commit(CommitValue),
+    Discard(DiscardValue),
+}
+
+/// A value returned only after the requested transaction disposition succeeds.
+#[derive(Debug)]
+pub enum WriteOutcome<CommitValue, DiscardValue> {
+    Committed(CommitValue),
+    Discarded(DiscardValue),
+}
+
+/// The phase in which a write did not complete as requested.
+#[derive(Debug)]
+pub enum WriteFailure<CommitValue, BodyError> {
+    Open(Error),
+    Body {
+        error: BodyError,
+        abort_error: Option<Error>,
+    },
+    Discard(Error),
+    /// The commit returned an error. The value describes the attempted write,
+    /// not a durable result; a caller must not treat it as a commit receipt.
+    CommitIndeterminate {
+        tentative: CommitValue,
+        source: Error,
+    },
+}
 
 pub struct Sema {
     database: Database,
@@ -653,6 +712,41 @@ impl Sema {
         let result = body(&txn)?;
         txn.commit()?;
         Ok(result)
+    }
+
+    /// Let the body choose whether to commit or discard this writer transaction.
+    /// A body error aborts the transaction. Commit errors remain indeterminate.
+    pub fn write_with_disposition<CommitValue, DiscardValue, BodyError>(
+        &self,
+        body: impl FnOnce(
+            &WriteTransaction,
+        )
+            -> std::result::Result<WriteDecision<CommitValue, DiscardValue>, BodyError>,
+    ) -> std::result::Result<
+        WriteOutcome<CommitValue, DiscardValue>,
+        WriteFailure<CommitValue, BodyError>,
+    > {
+        let txn = self
+            .database
+            .begin_write()
+            .map_err(|source| WriteFailure::Open(source.into()))?;
+        match body(&txn) {
+            Ok(WriteDecision::Commit(tentative)) => match txn.commit() {
+                Ok(()) => Ok(WriteOutcome::Committed(tentative)),
+                Err(source) => Err(WriteFailure::CommitIndeterminate {
+                    tentative,
+                    source: source.into(),
+                }),
+            },
+            Ok(WriteDecision::Discard(value)) => txn
+                .abort()
+                .map(|()| WriteOutcome::Discarded(value))
+                .map_err(|source| WriteFailure::Discard(source.into())),
+            Err(error) => Err(WriteFailure::Body {
+                error,
+                abort_error: txn.abort().err().map(Error::from),
+            }),
+        }
     }
 
     /// Run a closure in a read transaction; the txn drops at
