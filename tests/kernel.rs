@@ -554,3 +554,27 @@ fn schema_path_creates_parent_directories() {
     assert_eq!(sema.path(), path);
     let _ = std::fs::remove_dir_all(path.parent().unwrap().parent().unwrap().parent().unwrap());
 }
+
+#[test]
+fn conditional_write_reads_its_transaction_and_abort_discards_it() {
+    let path = temp_path();
+    let sema = Sema::open_with_schema(&path, &SCHEMA_V1).unwrap();
+    let row = ToyRecord { name: "row".into(), value: 1 };
+    let result = sema.write_conditional(|txn| {
+        assert_eq!(TOYS.get_in_write(txn, "key")?, None);
+        TOYS.insert(txn, "key", &row)?;
+        assert_eq!(TOYS.get_in_write(txn, "key")?, Some(row.clone()));
+        Ok(ControlFlow::<(), ()>::Break(()))
+    }).unwrap();
+    assert!(matches!(result, ControlFlow::Break(())));
+    assert_eq!(sema.read(|txn| TOYS.get(txn, "key")).unwrap(), None);
+    sema.write_conditional(|txn| {
+        TOYS.insert(txn, "key", &row)?;
+        Ok(ControlFlow::<(), ()>::Continue(()))
+    }).unwrap();
+    drop(sema);
+    let reopened = Sema::open_with_schema(&path, &SCHEMA_V1).unwrap();
+    assert_eq!(reopened.read(|txn| TOYS.get(txn, "key")).unwrap(), Some(row));
+    drop(reopened);
+    let _ = std::fs::remove_file(path);
+}
