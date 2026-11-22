@@ -100,6 +100,13 @@ impl From<rancor::Error> for Error {
     }
 }
 
+/// The point at which a write failed. A commit error has an indeterminate outcome.
+#[derive(Debug)]
+pub enum WriteFailure {
+    BeforeCommit(Error),
+    Commit(Error),
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 // ─── Database header — rkyv format guard ───────────────────
@@ -407,6 +414,17 @@ where
         Ok(Some(self.decode_value(guard.value())?))
     }
 
+    /// Read the current typed value through the same transaction that will write it.
+    pub fn get_in_write<'txn>(
+        &self,
+        txn: &'txn WriteTransaction,
+        key: impl std::borrow::Borrow<K::SelfType<'txn>>,
+    ) -> Result<Option<V>> {
+        let table = txn.open_table(self.definition())?;
+        let Some(guard) = table.get(key)? else { return Ok(None); };
+        Ok(Some(self.decode_value(guard.value())?))
+    }
+
     /// Insert `value` at `key`, overwriting any existing value.
     pub fn insert<'txn>(
         &self,
@@ -653,6 +671,18 @@ impl Sema {
         let result = body(&txn)?;
         txn.commit()?;
         Ok(result)
+    }
+
+    /// Abort on Break, or commit on Continue, retaining the failure phase.
+    pub fn write_conditional<R, A>(&self, body: impl FnOnce(&WriteTransaction) -> Result<ControlFlow<A, R>>) -> std::result::Result<ControlFlow<A, R>, WriteFailure> {
+        let txn = self.database.begin_write().map_err(|error| WriteFailure::BeforeCommit(error.into()))?;
+        match body(&txn).map_err(WriteFailure::BeforeCommit)? {
+            ControlFlow::Break(aborted) => Ok(ControlFlow::Break(aborted)),
+            ControlFlow::Continue(result) => {
+                txn.commit().map_err(|error| WriteFailure::Commit(error.into()))?;
+                Ok(ControlFlow::Continue(result))
+            }
+        }
     }
 
     /// Run a closure in a read transaction; the txn drops at
