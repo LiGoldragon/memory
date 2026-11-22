@@ -568,7 +568,7 @@ fn conditional_write_reads_its_transaction_and_abort_discards_it() {
     }).unwrap();
     assert!(matches!(result, ControlFlow::Break(())));
     assert_eq!(sema.read(|txn| TOYS.get(txn, "key")).unwrap(), None);
-    sema.write_conditional(|txn| {
+    let _ = sema.write_conditional(|txn| {
         TOYS.insert(txn, "key", &row)?;
         Ok(ControlFlow::<(), ()>::Continue(()))
     }).unwrap();
@@ -576,5 +576,20 @@ fn conditional_write_reads_its_transaction_and_abort_discards_it() {
     let reopened = Sema::open_with_schema(&path, &SCHEMA_V1).unwrap();
     assert_eq!(reopened.read(|txn| TOYS.get(txn, "key")).unwrap(), Some(row));
     drop(reopened);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn conditional_write_reports_body_failure_and_rolls_back() {
+    let path = temp_path();
+    let sema = Sema::open_with_schema(&path, &SCHEMA_V1).unwrap();
+    let row = ToyRecord { name: "row".into(), value: 1 };
+    let outcome = sema.write_conditional(|txn| {
+        TOYS.insert(txn, "key", &row)?;
+        Err::<ControlFlow<(), ()>, _>(Error::Io(std::io::Error::other("injected body failure")))
+    });
+    assert!(matches!(outcome, Err(sema::WriteFailure::BeforeCommit(Error::Io(_)))));
+    assert_eq!(sema.read(|txn| TOYS.get(txn, "key")).unwrap(), None);
+    drop(sema);
     let _ = std::fs::remove_file(path);
 }
