@@ -1,6 +1,7 @@
 //! Kernel-mode tests — exercise the Schema / Table&lt;K, V&gt; /
 //! version-guard surface consumed by component-owned Memory layers.
 
+use std::ops::{Bound, ControlFlow};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -327,6 +328,137 @@ fn typed_table_range_returns_owned_keys_and_values_in_key_order() {
             ),
         ]
     );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn typed_range_visitor_defers_decode_and_stops_at_the_requested_prefix() {
+    let path = temp_path();
+    let memory = Memory::open_with_schema(&path, &SCHEMA_V1).unwrap();
+    memory
+        .write(|txn| {
+            TOYS.insert(
+                txn,
+                "a",
+                &ToyRecord {
+                    name: "a".to_string(),
+                    value: 1,
+                },
+            )?;
+            TOYS.insert(
+                txn,
+                "c",
+                &ToyRecord {
+                    name: "c".to_string(),
+                    value: 3,
+                },
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    memory
+        .write(|txn| {
+            let mut raw = txn.open_table(TableDefinition::<&str, &[u8]>::new("toys"))?;
+            raw.insert("b", b"".as_slice())?;
+            Ok(())
+        })
+        .unwrap();
+
+    let (visited, decoded) = memory
+        .read(|txn| {
+            let mut visited = 0;
+            let mut decoded = 0;
+            TOYS.visit_range::<&str>(txn, "a".."z", |entry| {
+                visited += 1;
+                let (_key, _record) = entry.decode()?;
+                decoded += 1;
+                Ok(ControlFlow::Break(()))
+            })?;
+            Ok((visited, decoded))
+        })
+        .unwrap();
+    assert_eq!((visited, decoded), (1, 1));
+
+    let rows = memory
+        .read(|txn| {
+            let mut keys = Vec::new();
+            TOYS.visit_range::<&str>(txn, "a".."z", |entry| {
+                if entry.key() == "b" {
+                    return Ok(ControlFlow::Continue(()));
+                }
+                let (key, _record) = entry.decode()?;
+                keys.push(key);
+                Ok(ControlFlow::Continue(()))
+            })?;
+            Ok(keys)
+        })
+        .unwrap();
+    assert_eq!(rows, ["a", "c"]);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn ordered_visitor_row_visits_and_decodes_remain_at_prefix_size_as_table_grows() {
+    let path = temp_path();
+    let memory = Memory::open_with_schema(&path, &SCHEMA_V1).unwrap();
+    memory
+        .write(|txn| {
+            for key in ["a", "b", "c", "d"] {
+                TOYS.insert(
+                    txn,
+                    key,
+                    &ToyRecord {
+                        name: key.to_string(),
+                        value: 0,
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+    let observe_prefix = || {
+        memory
+            .read(|txn| {
+                let mut visited = 0;
+                let mut decoded = 0;
+                TOYS.visit_range::<&str>(
+                    txn,
+                    (Bound::<&str>::Unbounded, Bound::<&str>::Unbounded),
+                    |entry| {
+                        visited += 1;
+                        let (_key, _record) = entry.decode()?;
+                        decoded += 1;
+                        Ok(if decoded == 4 {
+                            ControlFlow::Break(())
+                        } else {
+                            ControlFlow::Continue(())
+                        })
+                    },
+                )?;
+                Ok((visited, decoded))
+            })
+            .unwrap()
+    };
+    assert_eq!(observe_prefix(), (4, 4));
+
+    memory
+        .write(|txn| {
+            for index in 0..4_096 {
+                let key = format!("key-{index:08}");
+                TOYS.insert(
+                    txn,
+                    key.as_str(),
+                    &ToyRecord {
+                        name: key.clone(),
+                        value: index,
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(observe_prefix(), (4, 4));
     let _ = std::fs::remove_file(&path);
 }
 
